@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using System.Security.Principal;
 
 namespace OopMenu
@@ -8,6 +9,8 @@ namespace OopMenu
         static string libery = "rajzok";
         static char minta = '█';
         static char torles = ' ';
+        static  string name = "";
+
         static void Main(string[] args)
         {
             var menuElements = new List<string> { "Létrehozás", "Szerkesztés", "Kilépés" };
@@ -38,6 +41,13 @@ namespace OopMenu
                     case ConsoleKey.Enter:
                         if (selectedIndex == 0)
                         {
+                            Console.Clear();
+                            Console.WriteLine("Adja meg a nevét: ");
+                            name = Console.ReadLine();
+                            if (name == "")
+                            {
+                                name = "Névtelen";
+                            }
                             Drawing();
                             menu.DrawMenu();
                         }
@@ -50,29 +60,31 @@ namespace OopMenu
                         {
                             Environment.Exit(1);
                         }
-                        break;
+                        break; ;
                 }
 
             } while (key != ConsoleKey.Escape);
         }
 
-        private static void Drawing(string filePath = null)
+        private static void Drawing(int drawingId = 0)
         {
             List<string> drawing = new List<string>();
             Console.Clear();
 
-            if (filePath != null)
+            using (var db = new DrawingContext())
             {
-                foreach (var line in File.ReadAllLines(filePath))
+                var drawingEntity = db.Drawings.Include(d => d.Dots).FirstOrDefault(d => d.DrawingId == drawingId);
+                if (drawingEntity != null)
                 {
-                    var parts = line.Split(',');
-                    Console.SetCursorPosition(int.Parse(parts[0]), int.Parse(parts[1]));
-                    Console.ForegroundColor = (ConsoleColor)Enum.Parse(typeof(ConsoleColor), parts[3]);
-                    Console.Write(parts[2]);
-                    drawing.Add(line);
+                    foreach (var dot in drawingEntity.Dots)
+                    {
+                        Console.SetCursorPosition(dot.X, dot.Y);
+                        Console.ForegroundColor = (ConsoleColor)Enum.Parse(typeof(ConsoleColor), dot.Color);
+                        Console.Write(dot.Shade);
+                        drawing.Add($"{dot.X},{dot.Y},{dot.Shade},{dot.Color}");
+                    }
                 }
             }
-
             ConsoleKey key;
 
             do
@@ -168,86 +180,112 @@ namespace OopMenu
                 }
             } while (key != ConsoleKey.Escape);
 
-            SaveDrawing(drawing, filePath);
+            SaveDrawing(drawing);
             Console.ResetColor();
         }
-
-        private static void SaveDrawing(List<string> drawing, string filePath = null)
+        private static void SaveDrawing(List<string> drawing)
         {
-            if (filePath == null)
+            using (var db = new DrawingContext())
             {
-                filePath = Path.Combine(libery, $"Paint {DateTime.Now:MMddHHmmss}.txt");
+                var newDrawing = new Drawing
+                {
+                    Name = name,
+                    CreationDate = DateTime.Now,
+                    Dots = new List<Dot>()
+                };
+
+                foreach (var line in drawing)
+                {
+                    var parts = line.Split(',');
+                    var dot = new Dot
+                    {
+                        X = int.Parse(parts[0]),
+                        Y = int.Parse(parts[1]),
+                        Shade = parts[2],
+                        Color = parts[3]
+                    };
+                    newDrawing.Dots.Add(dot);
+                }
+
+                db.Drawings.Add(newDrawing);
+                db.SaveChanges();
             }
-            File.WriteAllLines(filePath, drawing);
-            Console.WriteLine($"\nMentve: {filePath}");
+
             Console.ReadKey();
         }
+
+
 
         private static void ListDrawings()
         {
             Console.Clear();
-            var files = Directory.GetFiles(libery);
-            if (files.Length == 0)
+            using (var db = new DrawingContext())
             {
-                Console.WriteLine("Nincsenek rajzok a könyvtárban.");
-                Console.ReadKey();
-                return;
+                var drawings = db.Drawings.Include(d => d.Dots).ToList();
+                if (drawings.Count == 0)
+                {
+                    Console.WriteLine("Nincsenek rajzok a könyvtárban.");
+                    Console.ReadKey();
+                    return;
+                }
+
+                int selectedIndex = 0;
+                ConsoleKey key;
+                do
+                {
+                    Console.Clear();
+                    Console.WriteLine("Mentett rajzok (Enter: szerkesztés, Delete: törlés):");
+                    ConsoleColor defaultForeground = Console.ForegroundColor;
+                    ConsoleColor defaultBackground = Console.BackgroundColor;
+                    ConsoleColor selectedForeground = ConsoleColor.Magenta;
+                    ConsoleColor selectedBackground = ConsoleColor.White;
+                    for (int i = 0; i < drawings.Count; i++)
+                    {
+                        if (i == selectedIndex)
+                        {
+                            Console.ForegroundColor = selectedForeground;
+                            Console.BackgroundColor = selectedBackground;
+                            Console.WriteLine(drawings[i].Name);
+                            Console.ResetColor();
+                        }
+                        else
+                        {
+                            Console.ForegroundColor = defaultForeground;
+                            Console.BackgroundColor = defaultBackground;
+                            Console.WriteLine(drawings[i].Name);
+                        }
+                    }
+
+                    key = Console.ReadKey(true).Key;
+
+                    switch (key)
+                    {
+                        case ConsoleKey.UpArrow:
+                            selectedIndex = (selectedIndex == 0) ? drawings.Count - 1 : selectedIndex - 1;
+                            break;
+                        case ConsoleKey.DownArrow:
+                            selectedIndex = (selectedIndex == drawings.Count - 1) ? 0 : selectedIndex + 1;
+                            break;
+                        case ConsoleKey.Enter:
+                            Drawing(drawings[selectedIndex].DrawingId);
+                            break;
+                        case ConsoleKey.Delete:
+                            db.Drawings.Remove(drawings[selectedIndex]);
+                            db.SaveChanges();
+                            Console.WriteLine("Rajz törölve.");
+                            Console.ReadKey();
+                            return;
+                    }
+
+                } while (key != ConsoleKey.Escape);
             }
-
-            int selectedIndex = 0;
-            ConsoleKey key;
-            do
-            {
-                Console.Clear();
-                Console.WriteLine("Mentett rajzok (Enter: szerkesztés, Delete: törlés):");
-                ConsoleColor defaultForeground = Console.ForegroundColor;
-                ConsoleColor defaultBackground = Console.BackgroundColor;
-                ConsoleColor selectedForeground = ConsoleColor.Magenta;
-                ConsoleColor selectedBackground = ConsoleColor.White;
-                for (int i = 0; i < files.Length; i++)
-                {
-                    if (i == selectedIndex)
-                    {
-                        Console.ForegroundColor = selectedForeground;
-                        Console.BackgroundColor = selectedBackground;
-                        Console.WriteLine(Path.GetFileName(files[i]));
-                        Console.ResetColor();
-                    }
-                    else
-                    {
-                        Console.ForegroundColor = defaultForeground;
-                        Console.BackgroundColor = defaultBackground;
-                        Console.WriteLine(Path.GetFileName(files[i]));
-                    }
-                }
-
-                key = Console.ReadKey(true).Key;
-
-                switch (key)
-                {
-                    case ConsoleKey.UpArrow:
-                        selectedIndex = (selectedIndex == 0) ? files.Length - 1 : selectedIndex - 1;
-                        break;
-                    case ConsoleKey.DownArrow:
-                        selectedIndex = (selectedIndex == files.Length - 1) ? 0 : selectedIndex + 1;
-                        break;
-                    case ConsoleKey.Enter:
-                        Drawing(files[selectedIndex]);
-                        break;
-                    case ConsoleKey.Delete:
-                        File.Delete(files[selectedIndex]);
-                        Console.WriteLine("Rajz törölve.");
-                        Console.ReadKey();
-                        return;
-                }
-
-            } while (key != ConsoleKey.Escape);
         }
+
     }
 }
 
 
-            
-     
+
+
 
 
